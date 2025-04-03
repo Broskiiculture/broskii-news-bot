@@ -50,7 +50,7 @@ def translate_with_openrouter(title, link):
     """
 
     data = {
-        "model": "openchat",
+    "model": "mistralai/mistral-7b-instruct",
         "messages": [{"role": "user", "content": prompt}],
         "max_tokens": 300
     }
