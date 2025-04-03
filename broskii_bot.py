@@ -88,9 +88,11 @@ def translate_to_ja(title, link):
         "Content-Type": "application/json"
     }
     data = {
-        "model": "deepseek-chat",
-        "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 300
+    "model": "deepseek-ai/deepseek-chat",
+    "messages": [{"role": "user", "content": prompt}],
+    "max_tokens": 300
+}
+
     }
     res = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data)
 
