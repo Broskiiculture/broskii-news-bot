@@ -3,7 +3,7 @@ name: Broskii Bot Automation
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */3 * * *'  # 3時間ごとに実行（調整可）
+    - cron: '0 */3 * * *'  # 3時間に1回実行
 
 jobs:
   run-bot:
