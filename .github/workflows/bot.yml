@@ -1,6 +1,7 @@
 name: Broskii Deepseek Bot Automation
 
 on:
+  workflow_dispatch:  # ← これを追加
   schedule:
     - cron: '0 */1 * * *' # 毎時間実行
 
