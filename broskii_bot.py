@@ -3,29 +3,30 @@
 import os
 import feedparser
 import requests
-import tweepy
+import sqlite3
 from bs4 import BeautifulSoup
+import sqlite3
 
-# === API KEYS ===
+# === API Keys ===
 OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY')
-X_API_KEY = os.getenv('X_API_KEY')
-X_API_SECRET = os.getenv('X_API_SECRET')
-X_ACCESS_TOKEN = os.getenv('X_ACCESS_TOKEN')
-X_ACCESS_SECRET = os.getenv('X_ACCESS_SECRET')
 DISCORD_WEBHOOK_URL = os.getenv('DISCORD_WEBHOOK_URL')
 
-# === RSS Sources ===
+# === DB setup for duplication check ===
+conn = sqlite3.connect('posted.db')
+cursor = conn.cursor()
+cursor.execute('CREATE TABLE IF NOT EXISTS posts (url TEXT PRIMARY KEY)')
+conn.commit()
+
+# === Sources ===
 rss_urls = [
     'https://hiphopdx.com/rss',
     'https://www.complex.com/music/rss',
-    'https://www.hotnewhiphop.com/rss.xml',
     'https://pitchfork.com/feed-news/rss/',
     'https://www.xxlmag.com/feed/',
     'https://www.rollingstone.com/music/music-news/feed/',
     'https://hypebeast.com/feed',
 ]
 
-# === Scraping Targets ===
 scraping_targets = [
     'https://lyricallemonade.com/',
     'https://www.rollingloud.com/',
@@ -34,7 +35,7 @@ scraping_targets = [
     'https://hiphopwired.com/',
 ]
 
-# === RSS Fetch ===
+# === Get RSS News ===
 def fetch_rss():
     news = []
     for url in rss_urls:
@@ -43,54 +44,107 @@ def fetch_rss():
             news.append({'title': entry.title, 'link': entry.link})
     return news
 
-# === Scraping ===
+# === Scrape HTML News ===
 def fetch_scraping():
-    scraped_news = []
+    news = []
     for url in scraping_targets:
         try:
             r = requests.get(url, timeout=10)
             soup = BeautifulSoup(r.text, 'html.parser')
-            h2_tags = soup.find_all('h2')
-            for tag in h2_tags[:3]:
-                link = tag.find('a')['href'] if tag.find('a') else url
-                title = tag.get_text(strip=True)
+            for h2 in soup.find_all('h2')[:3]:
+                link = h2.find('a')['href'] if h2.find('a') else url
+                title = h2.get_text(strip=True)
                 if title:
-                    scraped_news.append({'title': title, 'link': link})
+                    news.append({'title': title, 'link': link})
         except Exception as e:
-            print(f"[Error scraping] {url}: {e}")
-    return scraped_news
+            print(f"[SCRAPE ERROR] {url}: {e}")
+    return news
 
-# === OpenRouter English Summarize ===
-def summarize_en(title, link):
-    prompt = f"Summarize the following hiphop news into 3 sentences for SNS:\nTitle: {title}\nURL: {link}"
-    data = {"model": "mistralai/mistral-7b-instruct", "messages": [{"role": "user", "content": prompt}], "max_tokens": 300}
-    headers = {"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"}
-    response = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data)
-    result = response.json()
-    return result['choices'][0]['message']['content'].strip()
+# === Translate with OpenRouter (オタク x ライター) ===
+def translate_to_ja(title, link):
+    prompt = f"""
+あなたはUSヒップホップのオタクであり、速報メディアのライターでもあります。
+以下の英語ニュースを、日本のヒップホップファン向けに速報ツイート風に翻訳してください。
 
-# === OpenRouter Japanese Convert ===
-def translate_ja(text, link):
-    prompt = f"以下の英語ニュース要約を日本語のヒップホップファン向けに分かりやすく、速報感のあるツイート文にしてください。\n{text}\n\n詳細: {link}"
-    data = {"model": "mistralai/mistral-7b-instruct", "messages": [{"role": "user", "content": prompt}], "max_tokens": 300}
-    headers = {"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"}
-    response = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data)
-    result = response.json()
+指示:
+- ヒップホップシーンっぽさ、オタクっぽさを出す（語彙例: シーン、ビーフ、ドリル、リリック、クルー、ムーブメント、バイブス）
+- 速報性を意識した文体（「速報」や「ついに」など）
+- 文末は「！」か「。」で統一
+- 日本語として自然で、読みやすく
+- 絵文字は不要
+- 必ず最後に「詳細: {link}」を追記
+
+【元ニュース】
+{title}
+    """
+
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    data = {
+        "model": "openhermes-2.5-mistral",
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": 400
+    }
+
+
+    res = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data)
+    result = res.json()
     return result['choices'][0]['message']['content'].strip()
 
 # === Discord Notify ===
-def notify_discord(message):
-    payload = {"content": message}
-    requests.post(DISCORD_WEBHOOK_URL, json=payload)
+def post_to_discord(text):
+    data = {"content": text}
+    r = requests.post(DISCORD_WEBHOOK_URL, json=data)
+    if r.status_code != 204:
+        raise Exception(f"Discord Webhook failed: {r.text}")
+
+# === Duplication check ===
+def is_duplicate(url):
+    cursor.execute('SELECT 1 FROM posts WHERE url = ?', (url,))
+    return cursor.fetchone() is not None
+
+def mark_posted(url):
+    cursor.execute('INSERT OR IGNORE INTO posts (url) VALUES (?)', (url,))
+    conn.commit()
+
+# === 重複防止DB ===
+def init_db():
+    conn = sqlite3.connect('news.db')
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS posted (url TEXT PRIMARY KEY)''')
+    conn.commit()
+    conn.close()
+
+def is_posted(url):
+    conn = sqlite3.connect('news.db')
+    c = conn.cursor()
+    c.execute('SELECT url FROM posted WHERE url = ?', (url,))
+    result = c.fetchone()
+    conn.close()
+    return result is not None
+
+def mark_posted(url):
+    conn = sqlite3.connect('news.db')
+    c = conn.cursor()
+    c.execute('INSERT OR IGNORE INTO posted (url) VALUES (?)', (url,))
+    conn.commit()
+    conn.close()
 
 # === Main ===
 def main():
+    init_db()
     news = fetch_rss() + fetch_scraping()
     for item in news:
+        if is_posted(item['link']):
+            print(f'⚠️ スキップ: {item["title"]} (既に投稿済み)')
+            continue
         try:
             en_summary = summarize_en(item['title'], item['link'])
             ja_text = translate_ja(en_summary, item['link'])
             notify_discord(ja_text)
+            mark_posted(item['link'])
             print(f'✅ 通知成功: {item["title"]}')
         except Exception as e:
             print(f'❌ 通知失敗: {e}')
