@@ -1,4 +1,4 @@
-# broskii_bot.py (最終版)
+# broskii_bot.py (DeepSeek R1 対応版)
 
 import os
 import feedparser
@@ -7,7 +7,7 @@ import sqlite3
 from bs4 import BeautifulSoup
 
 # === API Keys ===
-OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY')
+DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY')
 DISCORD_WEBHOOK_URL = os.getenv('DISCORD_WEBHOOK_URL')
 
 # === DB ===
@@ -69,7 +69,7 @@ def save_post(link):
     cursor.execute('INSERT OR IGNORE INTO posts (url) VALUES (?)', (link,))
     conn.commit()
 
-# === OpenRouter Translator ===
+# === DeepSeek Translator ===
 def translate_to_ja(title, link):
     prompt = f"""
 以下の海外ヒップホップニュースを、日本のヘッズ向けに速報ツイート文にしてください。
@@ -84,11 +84,11 @@ def translate_to_ja(title, link):
 """
 
     headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
         "Content-Type": "application/json"
     }
     data = {
-        "model": "openhermes",  # GPT3.5同等 & 日本語得意
+        "model": "deepseek-chat",
         "messages": [{"role": "user", "content": prompt}],
         "max_tokens": 300
     }
