@@ -88,10 +88,10 @@ def translate_to_ja(title, link):
         "max_tokens": 400
     }
 
-
     res = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data)
     result = res.json()
     return result['choices'][0]['message']['content'].strip()
+
 
 # === Discord Notify ===
 def post_to_discord(text):
