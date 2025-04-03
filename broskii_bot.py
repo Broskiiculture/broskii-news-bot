@@ -93,7 +93,6 @@ def translate_to_ja(title, link):
     "max_tokens": 300
 }
 
-    }
     res = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data)
 
     try:
