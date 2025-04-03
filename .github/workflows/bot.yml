@@ -1,20 +1,27 @@
 name: Broskii Bot Automation
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:  # 手動実行
   schedule:
-    - cron: '0 */3 * * *'  # 3時間に1回実行
+    - cron: '0 */3 * * *'  # 3時間ごとに実行
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
     steps:
+      # リポジトリ取得
       - uses: actions/checkout@v4
+
+      # Python 3.11セットアップ
       - uses: actions/setup-python@v4
         with:
           python-version: '3.11'
+
+      # 必要ライブラリインストール
       - run: pip install feedparser requests beautifulsoup4
+
+      # 環境変数セット＆Bot実行
       - env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: python broskii_bot.py
