@@ -109,45 +109,37 @@ def mark_posted(url):
     cursor.execute('INSERT OR IGNORE INTO posts (url) VALUES (?)', (url,))
     conn.commit()
 
-# === 重複防止DB ===
-def init_db():
-    conn = sqlite3.connect('news.db')
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS posted (url TEXT PRIMARY KEY)''')
-    conn.commit()
-    conn.close()
+# === 重複チェック用DB ===
+conn = sqlite3.connect("posted.db")
+cur = conn.cursor()
+cur.execute("CREATE TABLE IF NOT EXISTS posts (title TEXT, link TEXT)")
+conn.commit()
 
-def is_posted(url):
-    conn = sqlite3.connect('news.db')
-    c = conn.cursor()
-    c.execute('SELECT url FROM posted WHERE url = ?', (url,))
-    result = c.fetchone()
-    conn.close()
-    return result is not None
+def is_posted(title, link):
+    cur.execute("SELECT * FROM posts WHERE title=? OR link=?", (title, link))
+    return cur.fetchone() is not None
 
-def mark_posted(url):
-    conn = sqlite3.connect('news.db')
-    c = conn.cursor()
-    c.execute('INSERT OR IGNORE INTO posted (url) VALUES (?)', (url,))
+def save_post(title, link):
+    cur.execute("INSERT INTO posts (title, link) VALUES (?, ?)", (title, link))
     conn.commit()
-    conn.close()
+
 
 # === Main ===
 def main():
     init_db()
     news = fetch_rss() + fetch_scraping()
     for item in news:
-        if is_posted(item['link']):
-            print(f'⚠️ スキップ: {item["title"]} (既に投稿済み)')
-            continue
-        try:
-            en_summary = summarize_en(item['title'], item['link'])
-            ja_text = translate_ja(en_summary, item['link'])
-            notify_discord(ja_text)
-            mark_posted(item['link'])
-            print(f'✅ 通知成功: {item["title"]}')
-        except Exception as e:
-            print(f'❌ 通知失敗: {e}')
+    if is_posted(item['title'], item['link']):
+        print(f'⏭️ スキップ: {item["title"]}')
+        continue
+    try:
+        ja_text = translate_to_ja(item['title'], item['link'])
+        post_to_discord(ja_text)
+        save_post(item['title'], item['link'])
+        print(f'✅ 通知成功: {item["title"]}')
+    except Exception as e:
+        print(f'❌ 通知失敗: {e}')
+
 
 if __name__ == '__main__':
     main()
