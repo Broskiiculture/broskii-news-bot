@@ -1,85 +1,99 @@
+# broskii_bot.py
+
 import os
 import feedparser
 import requests
 import tweepy
+from bs4 import BeautifulSoup
 
-# === APIキー ===
+# === API KEYS ===
 OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY')
 X_API_KEY = os.getenv('X_API_KEY')
 X_API_SECRET = os.getenv('X_API_SECRET')
 X_ACCESS_TOKEN = os.getenv('X_ACCESS_TOKEN')
 X_ACCESS_SECRET = os.getenv('X_ACCESS_SECRET')
+DISCORD_WEBHOOK_URL = os.getenv('DISCORD_WEBHOOK_URL')
 
-# === RSS ===
+# === RSS Sources ===
 rss_urls = [
     'https://hiphopdx.com/rss',
     'https://www.complex.com/music/rss',
-    'https://pitchfork.com/rss/news/',
+    'https://www.hotnewhiphop.com/rss.xml',
+    'https://pitchfork.com/feed-news/rss/',
+    'https://www.xxlmag.com/feed/',
+    'https://www.rollingstone.com/music/music-news/feed/',
+    'https://hypebeast.com/feed',
 ]
 
-# === ニュース取得 ===
-def fetch_news(rss_urls):
-    news_items = []
+# === Scraping Targets ===
+scraping_targets = [
+    'https://lyricallemonade.com/',
+    'https://www.rollingloud.com/',
+    'https://rapradar.com/',
+    'https://allhiphop.com/',
+    'https://hiphopwired.com/',
+]
+
+# === RSS Fetch ===
+def fetch_rss():
+    news = []
     for url in rss_urls:
         feed = feedparser.parse(url)
         for entry in feed.entries[:3]:
-            news_items.append({
-                'title': entry.title,
-                'link': entry.link
-            })
-    return news_items
+            news.append({'title': entry.title, 'link': entry.link})
+    return news
 
-# === OpenRouterで日本語翻訳生成 ===
-def translate_with_openrouter(title, link):
-    headers = {
-        'Authorization': f'Bearer {OPENROUTER_API_KEY}',
-        'Content-Type': 'application/json',
-    }
-    prompt = f"""
-    あなたはアメリカのHIPHOP情報に詳しい日本人ライターです。
-    以下の英語のニュースタイトルとURLから、X（旧Twitter）向けの日本語投稿文を作ってください。
-    
-    【ルール】
-    - 速報感が伝わる
-    - 日本のHIPHOP好きがRTしたくなるような口語体
-    - US HIPHOPファン向けのスラングや言い回しもOK
-    - 末尾に #HIPHOP #速報 のタグをつける
+# === Scraping ===
+def fetch_scraping():
+    scraped_news = []
+    for url in scraping_targets:
+        try:
+            r = requests.get(url, timeout=10)
+            soup = BeautifulSoup(r.text, 'html.parser')
+            h2_tags = soup.find_all('h2')
+            for tag in h2_tags[:3]:
+                link = tag.find('a')['href'] if tag.find('a') else url
+                title = tag.get_text(strip=True)
+                if title:
+                    scraped_news.append({'title': title, 'link': link})
+        except Exception as e:
+            print(f"[Error scraping] {url}: {e}")
+    return scraped_news
 
-    【タイトル】{title}
-    【URL】{link}
-    """
-
-    data = {
-    "model": "mistralai/mistral-7b-instruct",
-        "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 300
-    }
-
+# === OpenRouter English Summarize ===
+def summarize_en(title, link):
+    prompt = f"Summarize the following hiphop news into 3 sentences for SNS:\nTitle: {title}\nURL: {link}"
+    data = {"model": "mistralai/mistral-7b-instruct", "messages": [{"role": "user", "content": prompt}], "max_tokens": 300}
+    headers = {"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"}
     response = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data)
     result = response.json()
+    return result['choices'][0]['message']['content'].strip()
 
-    if 'choices' not in result:
-        raise Exception(f"OpenRouter API Error: {result}")
+# === OpenRouter Japanese Convert ===
+def translate_ja(text, link):
+    prompt = f"以下の英語ニュース要約を日本語のヒップホップファン向けに分かりやすく、速報感のあるツイート文にしてください。\n{text}\n\n詳細: {link}"
+    data = {"model": "mistralai/mistral-7b-instruct", "messages": [{"role": "user", "content": prompt}], "max_tokens": 300}
+    headers = {"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"}
+    response = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data)
+    result = response.json()
+    return result['choices'][0]['message']['content'].strip()
 
-    content = result['choices'][0]['message']['content'].strip()
-    return content
+# === Discord Notify ===
+def notify_discord(message):
+    payload = {"content": message}
+    requests.post(DISCORD_WEBHOOK_URL, json=payload)
 
-# === 投稿 ===
-def post_tweet(content):
-    auth = tweepy.OAuth1UserHandler(X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN, X_ACCESS_SECRET)
-    api = tweepy.API(auth)
-    api.update_status(status=content)
-
-# === メイン ===
+# === Main ===
 def main():
-    news_items = fetch_news(rss_urls)
-    for item in news_items:
+    news = fetch_rss() + fetch_scraping()
+    for item in news:
         try:
-            post_content = translate_with_openrouter(item['title'], item['link'])
-            post_tweet(post_content)
-            print(f'✅投稿成功：{item["title"]}')
+            en_summary = summarize_en(item['title'], item['link'])
+            ja_text = translate_ja(en_summary, item['link'])
+            notify_discord(ja_text)
+            print(f'✅ 通知成功: {item["title"]}')
         except Exception as e:
-            print(f'❌投稿失敗：{e}')
+            print(f'❌ 通知失敗: {e}')
 
 if __name__ == '__main__':
     main()
